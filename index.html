@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V86 PLAY LIST</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FFD700">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#000;color:#fff;text-align:center;padding:10px}
+.player{border:2px solid #FFD700;border-radius:20px;padding:15px;background:#111;margin-bottom:15px}
+audio{width:100%;margin:10px 0}
+#nome{color:#FFD700;font-size:18px;font-weight:bold;margin:10px 0;min-height:25px}
+.btns{display:flex;justify-content:center;gap:10px;margin:10px 0;flex-wrap:wrap;align-items:center}
+.btns button{background:#FFD700;border:none;width:70px;height:70px;border-radius:50%;font-size:25px;cursor:pointer}
+.btns button.small{width:55px;height:55px;background:#222;border:2px solid #555}
+.lista{text-align:left;background:#1a1a1a;border-radius:10px;padding:5px;max-height:350px;overflow:auto;margin:10px 0}
+.item{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid #333}
+.item.active{color:#FFD700;background:#222;border-radius:8px}
+.item span{flex:1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.del{background:#ff2a2a;color:#fff;border:none;width:35px;height:35px;border-radius:50%;font-size:16px;cursor:pointer;margin-left:8px}
+.green{background:#00d26a;color:#fff;border:none;padding:15px;border-radius:12px;width:100%;font-weight:bold;font-size:16px;margin:8px 0;cursor:pointer}
+.yellow-box{background:#FFD700;color:#000;border-radius:15px;padding:15px;margin:15px 0}
+.yellow-box button{width:100%;padding:12px;margin:6px 0;border-radius:10px;border:none;font-weight:bold;font-size:15px;cursor:pointer}
+.black{background:#000;color:#FFD700}
+.tools{display:flex;gap:8px;margin:10px 0}
+.tools button{flex:1;padding:10px;border-radius:10px;border:2px solid #FFD700;background:#111;color:#FFD700;font-weight:bold;font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="player">
+<audio id="audio" controls></audio>
+<div id="nome">Carregando...</div>
+<div id="contador" style="color:#aaa">0 músicas</div>
+<div class="btns">
+<button class="small" onclick="tocarAleatorio()">🔀</button>
+<button onclick="anterior()">⏮</button>
+<button style="width:80px;height:80px;font-size:30px" onclick="playPause()">▶️</button>
+<button onclick="proxima()">⏭</button>
+<button class="small" onclick="toggleLoop()">🔁</button>
+</div>
+<div class="lista" id="lista"></div>
+<div class="tools">
+<button onclick="fazerBackup()">💾 Backup</button>
+<button onclick="document.getElementById('restoreInput').click()">♻️ Restaurar</button>
+<button onclick="resetar()">🗑️ Resetar</button>
+</div>
+</div>
+
+<button class="green" onclick="document.getElementById('fileInput').click()">➕ Adicionar Músicas e Vídeos do Celular</button>
+<input type="file" id="fileInput" multiple accept="audio/*,video/*" style="display:none">
+<input type="file" id="restoreInput" accept=".json" style="display:none">
+
+<div class="yellow-box">
+<h2>Gostou do V86 PLAY? 🔥</h2>
+<p>Compartilhe com a família!</p>
+<button class="black" onclick="tocarAleatorio()">🔀 Tocar Aleatoriamente</button>
+<button class="green" onclick="compartilharZap()">💚 Compartilhar no WhatsApp</button>
+<button class="black" onclick="compartilharZap()">👥 Convidar Amigo / Esposa</button>
+<p style="margin-top:10px"><a href="privacidade.html" style="color:#000">🔒 Política de Privacidade</a></p>
+</div>
+
+<button class="green" style="background:#FFD700;color:#000" onclick="instalar()">📲 INSTALAR APP NO CELULAR</button>
+
+<script>
+let musicasGitHub = [];
+let musicasLocal = [];
+let musicas = [];
+let indice = 0;
+const audio = document.getElementById('audio');
+const nomeEl = document.getElementById('nome');
+const listaEl = document.getElementById('lista');
+const contadorEl = document.getElementById('contador');
+let db;
+let deferredPrompt=null;
+
+// IndexedDB para salvar músicas de verdade
+const request = indexedDB.open('V86DB',1);
+request.onupgradeneeded = e=>{e.target.result.createObjectStore('musicas',{keyPath:'id',autoIncrement:true});};
+request.onsuccess = e=>{db=e.target.result; carregarLocalDB(); carregarListaGitHub();};
+request.onerror = ()=>{carregarListaGitHub();};
+
+function carregarLocalDB(){
+  if(!db) return;
+  const tx = db.transaction('musicas','readonly');
+  const store = tx.objectStore('musicas');
+  const req = store.getAll();
+  req.onsuccess = ()=>{
+    musicasLocal = req.result.map(r=>({id:r.id, nome:r.nome, url:URL.createObjectURL(r.blob), tipo:'local', blob:r.blob}));
+    montar();
+  };
+}
+
+async function carregarListaGitHub(){
+  try{
+    const res = await fetch('./musicas/lista.json?v='+Date.now());
+    const lista = await res.json();
+    musicasGitHub = lista.map(m=>({nome:m.nome, url:'./musicas/'+m.arquivo, tipo:'github'}));
+  }catch(e){musicasGitHub=[];}
+  montar();
+}
+
+function montar(){
+  musicas = [...musicasGitHub,...musicasLocal];
+  if(musicas.length>0){renderizar(); if(!audio.src) carregar(0);}
+  else{nomeEl.innerText="Nenhuma música"; contadorEl.innerText="0 músicas";}
+}
+
+function renderizar(){
+  listaEl.innerHTML="";
+  contadorEl.innerText=musicas.length+" músicas/vídeos";
+  musicas.forEach((m,i)=>{
+    const div=document.createElement('div'); div.className='item'+(i===indice?' active':'');
+    const span=document.createElement('span'); span.innerText=(i+1)+'. '+m.nome;
+    span.onclick=()=>{carregar(i); audio.play();};
+    const btn=document.createElement('button'); btn.className='del'; btn.innerText='🗑️';
+    btn.onclick=e=>{e.stopPropagation(); apagar(i);};
+    div.appendChild(span); div.appendChild(btn); listaEl.appendChild(div);
+  });
+}
+
+function carregar(i){indice=i; audio.src=musicas[i].url; nomeEl.innerText=musicas[i].nome; renderizar();}
+function playPause(){audio.paused?audio.play():audio.pause();}
+function proxima(){if(musicas.length){carregar((indice+1)%musicas.length); audio.play();}}
+function anterior(){if(musicas.length){carregar((indice-1+musicas.length)%musicas.length); audio.play();}}
+function tocarAleatorio(){if(musicas.length){carregar(Math.floor(Math.random()*musicas.length)); audio.play();}}
+function toggleLoop(){audio.loop=!audio.loop; alert(audio.loop?"Repetir: LIGADO":"Repetir: DESLIGADO");}
+audio.onended=()=>proxima();
+
+function apagar(i){
+  const m=musicas[i];
+  if(!confirm(`Apagar "${m.nome}"?`)) return;
+  if(m.tipo==='github'){
+    musicasGitHub.splice(musicasGitHub.findIndex(x=>x.url===m.url),1);
+    montar();
+  }else{
+    const tx=db.transaction('musicas','readwrite');
+    tx.objectStore('musicas').delete(m.id);
+    tx.oncomplete=()=>{carregarLocalDB();};
+  }
+}
+
+// Adicionar e salvar no banco
+document.getElementById('fileInput').addEventListener('change', async e=>{
+  const files=Array.from(e.target.files);
+  for(const f of files){
+    await new Promise(res=>{
+      const tx=db.transaction('musicas','readwrite');
+      tx.objectStore('musicas').add({nome:f.name, blob:f});
+      tx.oncomplete=res;
+    });
+  }
+  carregarLocalDB();
+});
+
+function fazerBackup(){
+  if(musicasLocal.length===0){alert('Nada para fazer backup, só músicas do GitHub. Adicione músicas pelo botão verde primeiro.'); return;}
+  const dados = musicasLocal.map(m=>({nome:m.nome}));
+  const blob=new Blob([JSON.stringify({data:new Date().toISOString(), qtd:musicasLocal.length, lista:dados},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='backup-v86-'+Date.now()+'.json'; a.click();
+  alert(`Backup de ${musicasLocal.length} músicas criado! As músicas ficam salvas automaticamente no celular, não precisa restaurar no mesmo aparelho. O backup é só a lista.`);
+}
+
+document.getElementById('restoreInput').addEventListener('change', e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const dados=JSON.parse(ev.target.result);
+      alert(`Backup de ${dados.qtd} músicas de ${dados.data}\n\nAs músicas já ficam salvas automaticamente no seu celular (não precisa restaurar).\nSe trocou de celular, adicione as músicas novamente pelo botão verde e use o backup como guia: ${dados.lista.map(x=>x.nome).join(', ').substring(0,200)}...`);
+    }catch{alert('Arquivo de backup inválido');}
+  }; reader.readAsText(file);
+});
+
+function resetar(){
+  if(confirm('Resetar? Vai apagar TODAS as músicas que você adicionou pelo celular e manter só as 2 do GitHub (que sua esposa recebe).')){
+    if(db){const tx=db.transaction('musicas','readwrite'); tx.objectStore('musicas').clear(); tx.oncomplete=()=>{musicasLocal=[]; montar(); carregarListaGitHub();};}
+  }
+}
+
+function compartilharZap(){const url=window.location.href; window.open(`https://wa.me/?text=V86 PLAY LIST 🔥 ${url}`, '_blank');}
+window.addEventListener('beforeinstallprompt', e=>{e.preventDefault(); deferredPrompt=e;});
+function instalar(){if(deferredPrompt)deferredPrompt.prompt(); else alert('No Chrome: 3 pontinhos > Instalar app');}
+if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+</script>
+</body>
+</html>
