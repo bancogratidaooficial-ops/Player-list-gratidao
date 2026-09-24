@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V86 PLAY LIST</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FFD700">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif}
+body{background:#000;color:#fff;padding-bottom:20px}
+.topo{background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;padding:20px;text-align:center;border-bottom:3px solid #000}
+.topo h1{font-size:30px;font-weight:900;letter-spacing:1px}
+.player-box{margin:15px;background:#111;border-radius:20px;overflow:hidden;border:2px solid #FFD700;box-shadow:0 0 15px rgba(255,215,0,0.3)}
+#player{width:100%;height:240px;background:#000;display:block}
+.info-musica{padding:15px;text-align:center;background:#111}
+.info-musica h3{color:#FFD700;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.controles{display:flex;justify-content:space-around;align-items:center;padding:15px 10px;background:#1a1a1a}
+.btn-ctrl{background:#FFD700;color:#000;border:none;width:55px;height:55px;border-radius:50%;font-size:22px;font-weight:bold;cursor:pointer}
+.btn-play{background:#FFD700;color:#000;border:none;width:75px;height:75px;border-radius:50%;font-size:34px;font-weight:bold;box-shadow:0 4px 10px rgba(0,0,0,0.5);cursor:pointer}
+.btn-extra{background:#222;color:#fff;border:2px solid #444;width:48px;height:48px;border-radius:50%;font-size:20px;cursor:pointer}
+.btn-extra.ativo{background:#25D366;border-color:#25D366;color:#fff}
+.btn-add{display:block;width:calc(100% - 30px);margin:15px auto;padding:16px;background:#25D366;color:white;border:none;border-radius:12px;font-weight:bold;font-size:16px}
+.lista{margin:15px}
+.item{background:#1a1a1a;padding:14px;border-radius:12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;border-left:5px solid #FFD700;cursor:pointer}
+.item.ativo{background:#332b00;border-left-color:#25D366;box-shadow:0 0 8px rgba(37,211,102,0.4)}
+.item b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;font-size:15px}
+.item span{font-size:12px;color:#888}
+.bloco-share{background:linear-gradient(135deg,#FFD700,#FFA500);margin:15px;padding:20px;border-radius:16px;text-align:center;color:#000}
+.btn-share{width:100%;padding:13px;margin-bottom:10px;border:none;border-radius:10px;font-weight:bold;font-size:15px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="topo">
+<h1>V86 PLAY LIST 🎵</h1>
+<p style="font-weight:bold">Seu som direto do celular</p>
+</div>
+
+<div class="player-box">
+<video id="player" controls playsinline></video>
+<div class="info-musica">
+<h3 id="nomeAtual">Nenhuma música selecionada</h3>
+<p id="contador" style="font-size:12px;color:#aaa;margin-top:4px">0 músicas/vídeos</p>
+</div>
+<div class="controles">
+<button class="btn-extra" id="btnShuffle" onclick="toggleShuffle()">🔀</button>
+<button class="btn-ctrl" onclick="anterior()">⏮</button>
+<button class="btn-play" id="btnPlay" onclick="playPause()">▶️</button>
+<button class="btn-ctrl" onclick="proxima()">⏭</button>
+<button class="btn-extra" id="btnLoop" onclick="toggleLoop()">🔁</button>
+</div>
+</div>
+
+<input type="file" id="inputFile" accept="audio/*,video/*" multiple style="display:none">
+<button class="btn-add" onclick="document.getElementById('inputFile').click()">➕ Adicionar Músicas e Vídeos do Celular</button>
+
+<div class="lista" id="lista"></div>
+
+<div class="bloco-share">
+<h3 style="margin:0 0 5px 0;">Gostou do V86 PLAY? 🔥</h3>
+<p style="margin:0 0 15px 0;font-size:13px;">Compartilhe com a família e escutem juntos!</p>
+<button onclick="tocarAleatorio()" class="btn-share" style="background:#000;color:#FFD700;">🔀 Tocar Músicas Aleatoriamente</button>
+<button onclick="compartilharApp()" class="btn-share" style="background:#25D366;color:white;">💚 Compartilhar no WhatsApp</button>
+<button onclick="compartilharApp()" class="btn-share" style="background:#000;color:#FFD700;">👥 Convidar Amigo / Esposa</button>
+<p style="margin-top:12px;font-size:12px"><a href="privacidade.html" style="color:#000;text-decoration:underline;font-weight:bold">🔒 Política de Privacidade</a></p>
+</div>
+
+<button id="btnInstalar" style="display:none;width:calc(100% - 30px);margin:0 15px 15px 15px;padding:14px;background:#FFD700;color:#000;border:none;border-radius:12px;font-weight:900;font-size:16px;box-shadow:0 4px 10px rgba(255,215,0,0.5)">📲 INSTALAR APP NO CELULAR</button>
+
+<script>
+let db,musicas=[],indiceAtual=-1,urls={},modoAleatorio=false,modoLoop=false,musicasServidor=[];
+const reqDB = indexedDB.open('V86PlayDB', 1);
+reqDB.onupgradeneeded = e => e.target.result.createObjectStore('musicas', {keyPath: 'id', autoIncrement: true});
+reqDB.onsuccess = e => { db = e.target.result; carregarMusicas(); carregarDoServidor(); };
+
+async function carregarDoServidor(){
+  try{
+    const res = await fetch('./musicas/lista.json');
+    if(!res.ok) return;
+    const lista = await res.json();
+    musicasServidor = [];
+    for(let item of lista){
+      try{
+        const r = await fetch('./musicas/'+item.arquivo);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        musicasServidor.push({nome:item.nome, blobUrl:url});
+      }catch(e){}
+    }
+    if(musicas.length===0) atualizarListaServidor();
+  }catch(e){}
+}
+function atualizarListaServidor(){
+  const listaEl = document.getElementById('lista');
+  document.getElementById('contador').innerText = musicasServidor.length + ' músicas no app - todos recebem';
+  document.getElementById('nomeAtual').innerText = musicasServidor.length>0? 'Pronto! Clique em uma música' : 'Nenhuma música - Adicione';
+  listaEl.innerHTML='';
+  musicasServidor.forEach((m,i)=>{
+    listaEl.innerHTML += `<div class="item ${i===indiceAtual && musicas.length===0?'ativo':''}" onclick="tocarServidor(${i})"><div><b>${m.nome}</b><span>🎵 Do App - Todos escutam</span></div></div>`;
+  });
+}
+function tocarServidor(i){
+  if(musicas.length>0 &&!confirm('Você tem músicas suas salvas. Quer tocar as músicas do APP que vão para sua esposa?')) return;
+  indiceAtual=i; const m=musicasServidor[i]; const p=document.getElementById('player');
+  p.src=m.blobUrl; p.play(); document.getElementById('nomeAtual').innerText=m.nome;
+  document.getElementById('btnPlay').innerText='⏸️'; atualizarListaServidor();
+}
+
+function carregarMusicas(){
+  const tx = db.transaction('musicas', 'readonly');
+  tx.objectStore('musicas').getAll().onsuccess = e => {
+    musicas = e.result;
+    musicas.forEach(m=>{ if(urls[m.id]) URL.revokeObjectURL(urls[m.id]); urls[m.id]=URL.createObjectURL(m.blob); });
+    if(musicas.length>0) atualizarLista(); else if(musicasServidor.length===0) atualizarLista();
+  };
+}
+document.getElementById('inputFile').addEventListener('change', async e=>{
+  const files=e.target.files; if(!files.length) return;
+  const tx=db.transaction('musicas','readwrite'); const store=tx.objectStore('musicas');
+  for(let f of files){ await new Promise(r=>{ store.add({nome:f.name,tipo:f.type,blob:f}).onsuccess=r; }); }
+  tx.oncomplete=()=>{ carregarMusicas(); e.target.value=''; };
+});
+function atualizarLista(){
+  if(musicas.length===0){ atualizarListaServidor(); return; }
+  const listaEl=document.getElementById('lista');
+  document.getElementById('contador').innerText=musicas.length+' músicas/vídeos'+(modoAleatorio?' • 🔀 Aleatório':'');
+  listaEl.innerHTML=''; musicas.forEach((m,i)=>{
+    listaEl.innerHTML+=`<div class="item ${i===indiceAtual?'ativo':''}" onclick="tocar(${i})"><div><b>${m.nome}</b><span>${m.tipo.includes('video')?'🎬 Vídeo':'🎵 Áudio'}</span></div><div><span onclick="event.stopPropagation(); remover(${m.id})" style="padding:10px">🗑️</span></div></div>`;
+  });
+}
+function tocar(i){ indiceAtual=i; const m=musicas[i]; const p=document.getElementById('player'); p.src=urls[m.id]; p.play(); document.getElementById('nomeAtual').innerText=m.nome; document.getElementById('btnPlay').innerText='⏸️'; atualizarLista(); }
+function playPause(){ const p=document.getElementById('player'); if(p.paused){ if(indiceAtual===-1){ if(musicas.length>0) tocar(0); else if(musicasServidor.length>0) tocarServidor(0); else return alert('Adicione músicas!'); } else p.play(); document.getElementById('btnPlay').innerText='⏸️'; } else { p.pause(); document.getElementById('btnPlay').innerText='▶️'; } }
+function proxima(){ if(modoAleatorio) return tocarAleatorio(); if(musicas.length>0){ let n=indiceAtual+1; if(n>=musicas.length) n=0; tocar(n); } else if(musicasServidor.length>0){ let n=indiceAtual+1; if(n>=musicasServidor.length) n=0; tocarServidor(n); } }
+function anterior(){ if(modoAleatorio) return tocarAleatorio(); if(musicas.length>0){ let n=indiceAtual-1; if(n<0) n=musicas.length-1; tocar(n); } else if(musicasServidor.length>0){ let n=indiceAtual-1; if(n<0) n=musicasServidor.length-1; tocarServidor(n); } }
+function tocarAleatorio(){ const total = musicas.length>0? musicas.length : musicasServidor.length; if(total===0) return alert('Adicione músicas primeiro!'); let novo; do{ novo=Math.floor(Math.random()*total); }while(total>1 && novo===indiceAtual); if(musicas.length>0) tocar(novo); else tocarServidor(novo); if(!modoAleatorio) toggleShuffle(); }
+function toggleShuffle(){ modoAleatorio=!modoAleatorio; const b=document.getElementById('btnShuffle'); b.classList.toggle('ativo',modoAleatorio); atualizarLista(); }
+function toggleLoop(){ modoLoop=!modoLoop; document.getElementById('player').loop=modoLoop; const b=document.getElementById('btnLoop'); b.classList.toggle('ativo',modoLoop); }
+function remover(id){ if(!confirm('Remover essa música do seu celular?')) return; const tx=db.transaction('musicas','readwrite'); tx.objectStore('musicas').delete(id); tx.oncomplete=()=>{ URL.revokeObjectURL(urls[id]); delete urls[id]; if(musicas[indiceAtual] && musicas[indiceAtual].id===id){ document.getElementById('player').pause(); document.getElementById('player').src=''; indiceAtual=-1; } carregarMusicas(); }; }
+document.getElementById('player').addEventListener('ended',()=>{ if(!modoLoop) proxima(); });
+function compartilharApp(){ const url=window.location.href; const texto='🎵 Baixa meu app V86 PLAY LIST! Já vem com minhas músicas dentro, toca direto e sem anúncio: '; if(navigator.share){ navigator.share({title:'V86 PLAY LIST',text:texto,url:url}); } else { window.open('https://wa.me/?text='+encodeURIComponent(texto+url),'_blank'); } }
+let appParaInstalar=null; window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); appParaInstalar=e; document.getElementById('btnInstalar').style.display='block'; });
+document.getElementById('btnInstalar').addEventListener('click',async()=>{ if(!appParaInstalar) return; appParaInstalar.prompt(); const c=await appParaInstalar.userChoice; if(c.outcome==='accepted') document.getElementById('btnInstalar').style.display='none'; appParaInstalar=null; });
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js'); }
+</script>
+</body>
+</html>
